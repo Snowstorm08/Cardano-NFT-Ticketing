@@ -190,27 +190,3 @@ endpoints = awaitPromise (createEvent' `select` buyTicket' `select` startSale') 
     createEvent' = endpoint @"createEvent" createEvent
     buyTicket'   = endpoint @"buyTicket" buyTicket
     startSale'   = endpoint @"startSale" startSale
-
-
--- TODO: Find a ticket NFT based on the Event Name and Ticket Number
--- findTicket :: EventName -> TicketNumber -> Contract w ProductSchema Bool ()
--- findTicket ename tnum = do
---     pkh <- Contract.ownPaymentPubKeyHash
---     let tTicketName = ename ++ "_" ++ show tnum  
---     --Extras.logInfo $ "findTicket. Trying to find ticket: " ++ show tTicketName
---     utxos <- utxosAt $ pubKeyHashAddress pkh Nothing
---     let utxosList = Map.toList utxos
---         utxosTkList = PlutusTx.Prelude.filter (hasTokens . _ciTxOutValue . snd) utxosList
---     return False
- 
--- Does value contain non-Ada tokens?
--- hasTokens :: Value -> Bool
--- hasTokens = not . Value.isZero . removeAda
-
--- -- Remove all Ada from value
--- removeAda :: Value -> Value
--- removeAda v = let
---     adaValue = valueOf v adaSymbol adaToken
---     negateAdaValue = lovelaceValueOf . negate $ adaValue
---   in
---     v <> negateAdaValue
