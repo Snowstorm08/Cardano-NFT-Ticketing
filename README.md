@@ -22,33 +22,29 @@ epNumberOfTickets - The number of tickets to mint.
 
 This will mint the tickets using the Event Name and Ticket Number as the Token Name.
 
-2. Call "startSale" endpoint (Offchain) with StartParams.
+2. Call "startSaleAllTickets" endpoint (Offchain) with StartSaleParams.
 An example:    
         
 ```
-        StartParams{
-           sPrice         = 5000000, -- 5 ADA
-           sToken         = "NYE2023_1",
-           sCurrSym       = "a8038825de6ee33c0f4970c8ddec533366e0b7a436a1df8b59a6808e"
+        StartSaleParams{
+           saPrice         = 5000000, -- 5 ADA
         }
  ```
         
 Note: The ticket price will be paid to the wallet holding the NFT.
 
-sPrice - The price of the ticket (in lovelace)
+sPrice - The price of the ticket (in lovelace).
 
-sCurrSym - The currency symbol of the NFT.
+This will find all tickets for sale at the wallet address and lock them for sale with a script.
 
-sToken - The token name of the NFT.
-
-3. Call "buyTicket" endpoint (Offchain) with BuyParams.
+3. Call "buyTicketByName" endpoint (Offchain) with BuyTicketByNameParams.
 An example:
 ```    
-        BuyParams{
-           bToken    = "NYE2023_1",
-           bCurrSym  = "a8038825de6ee33c0f4970c8ddec533366e0b7a436a1df8b59a6808e",
+       BuyTicketByNameParams{
+           btTicketName    = "Event2023_2",
+           btSellerAddress = mockWalletPaymentPubKeyHash $ knownWallet 1
         }
 ``` 
-bToken - The name of the NFT to buy.
+btTicketName - The name of the ticket to buy. This will be in the format of [event name]_[ticket number]
 
-bCurrSym - The currency symbol of the NFT.
+btSellerAddress - The wallet address of the ticket seller.

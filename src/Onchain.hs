@@ -29,10 +29,10 @@ import           Ledger.Ada                as Ada
 import           PlutusTx.Prelude          hiding (Semigroup(..), unless)
 import           Ledger                    hiding (mint, singleton)
 import qualified Ledger.Typed.Scripts      as Scripts
-import           Ledger.Value              as Value
+import           Ledger.Value              as Value (valueOf, flattenValue)
 import qualified Plutus.V1.Ledger.Scripts  as Plutus
 import qualified Plutus.V1.Ledger.Interval as LedgerIntervalV1
-import qualified Plutus.V2.Ledger.Contexts as Contexts
+--import qualified Plutus.V2.Ledger.Contexts as Contexts
 import           DataTypes
 
 
@@ -76,17 +76,20 @@ policy pkh oref tn deadline = mkMintingPolicyScript $
     PlutusTx.liftCode deadline
 
 {-# INLINABLE mkBuyValidator #-}
-mkBuyValidator :: PaymentPubKeyHash -> TicketSale -> SaleAction -> ScriptContext -> Bool
-mkBuyValidator mp nfts r ctx = case r of
-    Buy     -> traceIfFalse "Ticket was not transferred" (valueOf (valuePaidTo info sig) (nCurrency nfts) (nToken nfts) == 1) && 
+mkBuyValidator :: TicketSale -> SaleAction -> ScriptContext -> Bool
+mkBuyValidator nfts r ctx = case r of
+    Buy     -> traceIfFalse "Invalid signature. Expecting just 1 signature." valiSig &&
+               traceIfFalse "Ticket was not transferred" (valueOf (valuePaidTo info getSig) (nCurrency nfts) (nToken nfts) == 1) && 
                traceIfFalse "Incorrect price paid" (checkPrice (unPaymentPubKeyHash (nSeller nfts)) (nPrice nfts))
   where
     info :: TxInfo
     info = scriptContextTxInfo ctx
 
-    sig :: PubKeyHash
-    sig = case txInfoSignatories info of
-            [pubKeyHash] -> pubKeyHash
+    valiSig :: Bool
+    valiSig = length(txInfoSignatories info) == 1
+
+    getSig :: PubKeyHash
+    getSig = PlutusTx.Prelude.head (txInfoSignatories info)
 
     -- Check the correct price has been paid to the seller
     checkPrice :: PubKeyHash -> Integer -> Bool
@@ -99,7 +102,7 @@ instance Scripts.ValidatorTypes Sale where
 
 typedBuyValidator :: PaymentPubKeyHash -> Scripts.TypedValidator Sale
 typedBuyValidator mp = Scripts.mkTypedValidator @Sale
-    ($$(PlutusTx.compile [|| mkBuyValidator ||]) `PlutusTx.applyCode` PlutusTx.liftCode mp)
+    ($$(PlutusTx.compile [|| mkBuyValidator ||]))
     $$(PlutusTx.compile [|| wrap ||])
   where
     wrap = Scripts.wrapValidator @TicketSale @SaleAction

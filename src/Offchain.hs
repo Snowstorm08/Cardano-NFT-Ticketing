@@ -17,6 +17,7 @@ module Offchain
     where
 
 import           Control.Monad          hiding (fmap, sequence_)
+import           Control.Lens
 import           Data.Aeson             (ToJSON)
 import           Data.Text              (Text)
 import           Data.String            (IsString (..))
@@ -37,8 +38,8 @@ import           Onchain
 
 type ProductSchema =
         Endpoint "createEvent" EventParams
-    .\/ Endpoint "buyTicket"   BuyParams
-    .\/ Endpoint "startSale"   StartParams
+    .\/ Endpoint "startSaleAllTickets" StartSaleParams
+    .\/ Endpoint "buyTicketByName" BuyTicketByNameParams
 
 -- Create the tickets (NFT's) based on the provided event parameters
 createEvent :: EventParams -> Contract w ProductSchema Text ()
@@ -76,7 +77,7 @@ mintTicket tParams = do
     now <- Contract.currentTime
     -- Check the deadline
     if now > eventTime
-        then Contract.logError @String $ printf "Event has begun. Cannot sell anymore tickets. Current Time: %s. Event Time: %s" 
+        then Contract.logInfo @String $ printf "Event has begun. Cannot sell anymore tickets. Current Time: %s. Event Time: %s" 
           (show now) 
           (show eventTime)
         else do
@@ -108,11 +109,11 @@ buyTicket bp = do
     pkh <- Contract.ownPaymentPubKeyHash
     let sellerAdd = bSellerAddress bp
     let ticketName = bToken bp
-    Contract.logInfo @String $ printf "buyTicket - Trying to find sale. Buyer: %s" (show pkh)
+    Contract.logInfo @String $ printf "buyTicket - Trying to find sale. Buyer: %s. Seller: %s." (show pkh) (show sellerAdd)
     -- Find the ticket for sale
     sale <- findTicketSale (sellerAdd, bCurrSym bp, ticketName)
     case sale of
-        Nothing -> Contract.logError @String $ printf "buyTicket - Could not locate the ticket requested: %s" (show ticketName)
+        Nothing -> Contract.logError @String $ printf "buyTicket - Could not locate the ticket requested: %s. Currency Symbol: %s." (show ticketName) (show $ bCurrSym bp)
         Just (oref, o, nfts) -> do            
             let r       = Redeemer $ PlutusTx.toBuiltinData Buy
                 -- Value is the ticket NFT and the minimum ADA that must also be included with a token transaction
@@ -141,12 +142,9 @@ buyTicket bp = do
             Contract.logInfo @String "Buy - Transaction confirmed"
 
 -- Start a sale of event tickets
-startSale :: StartParams -> Contract w ProductSchema Text ()
-startSale sp = do
-    pkh <- Contract.ownPaymentPubKeyHash
-    let tTokenName = sToken sp
-    let tCurrSymbol = sCurrSym sp
-    
+startSale :: Integer -> CurrencySymbol -> TokenName -> Contract w ProductSchema Text ()
+startSale tPrice tCurrSymbol tTokenName = do
+    pkh <- Contract.ownPaymentPubKeyHash  
     Contract.logInfo @String $ printf "startSale - Starting with Token: %s. Currency Symbol: %s" (show tTokenName) (show tCurrSymbol) 
 
     utxos <- utxosAt $ pubKeyHashAddress pkh Nothing
@@ -156,7 +154,7 @@ startSale sp = do
         -- Must also transfter minimum ADA amount with token
         let valToken = Value.singleton (tCurrSymbol) (tTokenName) 1 <> Ada.toValue Ledger.minAdaTxOut
             -- Set the NFT datum that can be used when selling the ticket
-            datum = TicketSale { nSeller = pkh, nToken = tTokenName, nCurrency = tCurrSymbol, nPrice = sPrice sp}
+            datum = TicketSale { nSeller = pkh, nToken = tTokenName, nCurrency = tCurrSymbol, nPrice = tPrice}
             lookups  = Constraints.unspentOutputs utxos <>
                       -- Set the buy validator
                        Constraints.typedValidatorLookups (typedBuyValidator pkh)
@@ -166,6 +164,70 @@ startSale sp = do
         ledgerTx <- submitTxConstraintsWith @Sale lookups tx
         void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
         Contract.logInfo @String "startSale transaction confirmed"
+
+buyTicketByName :: BuyTicketByNameParams -> Contract w ProductSchema Text ()
+buyTicketByName bp = do
+   let bSellerAdd = btSellerAddress bp
+   let bTicketName = btTicketName bp
+   Contract.logInfo @String $ printf "buyTicketByName - Trying to buy ticket: %s. From address: %s." (show bTicketName) (show bSellerAdd) 
+   utxos <- utxosAt $ (scriptAddress $ buyValidator bSellerAdd)
+   let utxosFlat = Value.flattenValue $ mconcat . map (^. ciTxOutValue) . Map.elems $ utxos
+   if length utxosFlat > 0 then
+      tryBuyTicket bp utxosFlat
+    else
+      Contract.logError @String $ printf "buyTicketByName. No UTXO's found"
+
+tryBuyTicket :: BuyTicketByNameParams -> [(CurrencySymbol, TokenName, Integer)] -> Contract w ProductSchema Text ()
+tryBuyTicket bp xs = do
+   let utxo = head xs
+   let utxoRemaining = tail xs
+   let bpTicketRequested = fromString (btTicketName bp)
+
+    -- Extract the values we need based on their index
+   let cs = utxo ^. _1
+   let tname = utxo ^. _2
+   let tamount = utxo ^. _3
+
+   if tname == bpTicketRequested && tamount == 1 then do
+     let tTicket = BuyParams cs tname (btSellerAddress bp)
+     logInfo @String $ printf "tryBuyTicket. Found ticket to buy. Token Name: %s. Currency Symbol: %s." (show tname) (show cs)
+     buyTicket tTicket
+   else do
+    if length utxoRemaining == 0 then 
+      logInfo @String $ "tryBuyTicket. No more tickets found."
+    else
+      tryBuyTicket bp utxoRemaining
+
+startSaleAllTickets :: StartSaleParams -> Contract w ProductSchema Text ()
+startSaleAllTickets sp = do
+    let ticketPrice = saPrice sp
+    pkh <- Contract.ownPaymentPubKeyHash
+    Contract.logInfo @String $ printf "startSaleAllTickets - Starting sale of all tickets at address: %s. Price: %s" (show pkh) (show ticketPrice)
+    utxos <- utxosAt $ pubKeyHashAddress pkh Nothing
+    let utxosFlat = Value.flattenValue $ mconcat . map (^. ciTxOutValue) . Map.elems $ utxos
+    Contract.logInfo @String $ printf "startSaleAllTickets. UTXO's %s" (show utxosFlat)
+    tryStartSale sp utxosFlat
+
+tryStartSale :: StartSaleParams -> [(CurrencySymbol, TokenName, Integer)] -> Contract w ProductSchema Text ()
+tryStartSale sp xs = do
+    let utxo = head xs
+    let utxoRemaining = tail xs
+
+    -- Extract the values we need based on their index
+    let cs = utxo ^. _1
+    let tname = utxo ^. _2
+    let tamount = utxo ^. _3
+
+    if cs /= "" && tname /= "" && tamount == 1 then do
+      Contract.logInfo @String $ printf "tryStartSale. Currency Symbol: %s. Token Name: %s. Amount: %s" (show cs) (show tname) (show tamount)
+      startSale (saPrice sp) cs tname
+    else do
+      Contract.logInfo @String $ printf "tryStartSale. Skipped UTXO, not a valid ticket. Token Name: %s" (show tname) 
+
+    if length utxoRemaining == 0 then 
+      logInfo @String $ "tryStartSale. No more tickets to put on sale."
+    else
+      tryStartSale sp utxoRemaining
 
 -- Find the the ticket based on the Currency Symbol and Token Name
 findTicketSale :: (AsContractError e, ToJSON e) => (PaymentPubKeyHash, CurrencySymbol, TokenName) -> Contract w ProductSchema e (Maybe (TxOutRef, ChainIndexTxOut, TicketSale))
@@ -185,8 +247,8 @@ findTicketSale (sellerAdd, cs, tn) = do
 
 
 endpoints :: Contract () ProductSchema Text ()
-endpoints = awaitPromise (createEvent' `select` buyTicket' `select` startSale') >> endpoints
+endpoints = awaitPromise (createEvent' `select` startSaleAllTickets' `select` buyTicketByName') >> endpoints
  where
     createEvent' = endpoint @"createEvent" createEvent
-    buyTicket'   = endpoint @"buyTicket" buyTicket
-    startSale'   = endpoint @"startSale" startSale
+    buyTicketByName'   = endpoint @"buyTicketByName" buyTicketByName
+    startSaleAllTickets' = endpoint @"startSaleAllTickets" startSaleAllTickets

@@ -15,7 +15,8 @@ module DataTypes
       BuyParams (..),
       TicketSale (..),
       SaleAction (..),
-      StartParams (..),
+      StartSaleParams (..),
+      BuyTicketByNameParams (..),
       TicketNumber,
       EventName,
       TicketData (..)
@@ -56,11 +57,15 @@ data EventParams = EventParams
     } 
     deriving (Show, Generic, FromJSON, ToJSON, ToSchema)
 
-data StartParams = StartParams
+data StartSaleParams = StartSaleParams
     { 
-      sPrice      :: Integer,
-      sCurrSym    :: !CurrencySymbol,
-      sToken      :: !TokenName
+      saPrice      :: Integer
+    } deriving (Eq, Ord, Show, Generic, ToJSON, FromJSON, ToSchema)
+
+data BuyTicketByNameParams = BuyTicketByNameParams
+    {
+      btTicketName    :: !String,
+      btSellerAddress :: !PaymentPubKeyHash
     } deriving (Eq, Ord, Show, Generic, ToJSON, FromJSON, ToSchema)
 
 data BuyParams = BuyParams
