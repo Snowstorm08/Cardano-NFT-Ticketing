@@ -1,130 +1,115 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DeriveAnyClass       #-}
+{-# LANGUAGE DeriveGeneric        #-}
+{-# LANGUAGE DerivingStrategies   #-}
+{-# LANGUAGE FlexibleContexts     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE NoImplicitPrelude    #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE TemplateHaskell      #-}
 
 module DataTypes
-  ( TicketParams(..)
+  ( -- * Type Aliases
+    EventName
+  , TicketNumber
+    -- * Core Data Types
+  , TicketData(..)
+  , TicketParams(..)
   , EventParams(..)
-  , BuyParams(..)
   , TicketSale(..)
   , SaleAction(..)
+    -- * Endpoint Parameters
   , StartSaleParams(..)
+  , BuyParams(..)
   , BuyTicketByNameParams(..)
-  , TicketNumber
-  , EventName
-  , TicketData(..)
   ) where
 
-import           Data.Aeson                 (ToJSON, FromJSON)
-import           GHC.Generics               (Generic)
-import           Schema                     (ToSchema)
-import           Ledger                     (PaymentPubKeyHash, TokenName, CurrencySymbol)
-import           Plutus.V1.Ledger.Time      (POSIXTime)
-import           PlutusTx.Prelude           hiding (Show)
+import           Data.Aeson            (FromJSON, ToJSON)
+import           GHC.Generics          (Generic)
+import           Ledger                (CurrencySymbol, PaymentPubKeyHash, TokenName)
+import           Plutus.V1.Ledger.Time (POSIXTime)
 import qualified PlutusTx
-import           Prelude                    (Show, Eq, Ord, String)
+import           PlutusTx.Prelude      hiding (Show)
+import           Prelude               (Eq, Ord, Show, String)
+import           Schema                (ToSchema)
 
--------------------------------------------------
--- Type Aliases
--------------------------------------------------
+-- | Human-readable event identifier.
+type EventName    = String
 
-type EventName = String
+-- | Numeric ticket identifier within an event.
 type TicketNumber = Integer
 
--------------------------------------------------
--- Ticket Data
--------------------------------------------------
+---------------------------------------------------------------------------
+-- On-chain / Reference Types
+---------------------------------------------------------------------------
 
+-- | Lightweight reference to a minted ticket (currency symbol + token name).
 data TicketData = TicketData
   { tCurrSym :: !CurrencySymbol
   , tToken   :: !TokenName
-  }
-  deriving (Show, Generic, Eq)
+  } deriving stock    (Show, Eq, Generic)
 
--------------------------------------------------
--- Ticket Minting Parameters
--------------------------------------------------
-
-data TicketParams = TicketParams
-  { tpTicketName :: !TokenName
-  , tpTicketNum  :: !Integer
-  , tpDeadline   :: !POSIXTime
-  }
-  deriving (Show, Generic, FromJSON, ToJSON, ToSchema, Eq)
-
--------------------------------------------------
--- Event Parameters
--------------------------------------------------
-
-data EventParams = EventParams
-  { epEventName       :: !EventName
-  , epEventTime       :: !POSIXTime
-  , epNumberOfTickets :: !Integer
-  }
-  deriving (Show, Generic, FromJSON, ToJSON, ToSchema, Eq)
-
--------------------------------------------------
--- Sale Initialization
--------------------------------------------------
-
-data StartSaleParams = StartSaleParams
-  { saPrice :: !Integer
-  }
-  deriving (Show, Generic, ToJSON, FromJSON, ToSchema, Eq, Ord)
-
--------------------------------------------------
--- Buy Ticket (using ticket name)
--------------------------------------------------
-
-data BuyTicketByNameParams = BuyTicketByNameParams
-  { btTicketName    :: !String
-  , btSellerAddress :: !PaymentPubKeyHash
-  }
-  deriving (Show, Generic, ToJSON, FromJSON, ToSchema, Eq, Ord)
-
--------------------------------------------------
--- Buy Ticket (using currency + token)
--------------------------------------------------
-
-data BuyParams = BuyParams
-  { bCurrSym       :: !CurrencySymbol
-  , bToken         :: !TokenName
-  , bSellerAddress :: !PaymentPubKeyHash
-  }
-  deriving (Show, Generic, ToJSON, FromJSON, ToSchema, Eq, Ord)
-
--------------------------------------------------
--- Ticket Sale Datum
--------------------------------------------------
-
+-- | On-chain datum attached to a ticket-sale UTXO.
 data TicketSale = TicketSale
   { nSeller   :: !PaymentPubKeyHash
   , nPrice    :: !Integer
   , nCurrency :: !CurrencySymbol
   , nToken    :: !TokenName
-  }
-  deriving (Show, Generic, ToJSON, FromJSON, Eq)
+  } deriving stock    (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON)
 
--------------------------------------------------
--- Redeemer
--------------------------------------------------
-
+-- | On-chain redeemer for the sale validator.
 data SaleAction = Buy
-  deriving Show
+  deriving stock (Show)
 
--------------------------------------------------
--- Plutus Template Haskell
--------------------------------------------------
+---------------------------------------------------------------------------
+-- Off-chain / Endpoint Parameter Types
+---------------------------------------------------------------------------
 
-PlutusTx.makeIsDataIndexed ''TicketSale [('TicketSale, 0)]
-PlutusTx.makeLift ''TicketSale
+-- | Parameters for minting a batch of tickets.
+data TicketParams = TicketParams
+  { tpTicketName :: !TokenName
+  , tpTicketNum  :: !Integer
+  , tpDeadline   :: !POSIXTime
+  } deriving stock    (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
 
-PlutusTx.makeIsDataIndexed ''SaleAction [('Buy, 0)]
-PlutusTx.makeLift ''SaleAction
+-- | Parameters for creating a new event.
+data EventParams = EventParams
+  { epEventName       :: !EventName
+  , epEventTime       :: !POSIXTime
+  , epNumberOfTickets :: !Integer
+  } deriving stock    (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
+
+-- | Parameters for listing a ticket for sale.
+data StartSaleParams = StartSaleParams
+  { saPrice :: !Integer
+  } deriving stock    (Show, Eq, Ord, Generic)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
+
+-- | Buy a ticket by currency symbol and token name.
+data BuyParams = BuyParams
+  { bCurrSym       :: !CurrencySymbol
+  , bToken         :: !TokenName
+  , bSellerAddress :: !PaymentPubKeyHash
+  } deriving stock    (Show, Eq, Ord, Generic)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
+
+-- | Buy a ticket by its human-readable name.
+data BuyTicketByNameParams = BuyTicketByNameParams
+  { btTicketName    :: !String
+  , btSellerAddress :: !PaymentPubKeyHash
+  } deriving stock    (Show, Eq, Ord, Generic)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
+
+---------------------------------------------------------------------------
+-- Plutus TH – Serialisation & Lifting
+---------------------------------------------------------------------------
+
+PlutusTx.makeIsDataIndexed ''TicketSale  [('TicketSale, 0)]
+PlutusTx.makeLift          ''TicketSale
+
+PlutusTx.makeIsDataIndexed ''SaleAction  [('Buy, 0)]
+PlutusTx.makeLift          ''SaleAction
